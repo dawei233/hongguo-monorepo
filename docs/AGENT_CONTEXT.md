@@ -3,6 +3,8 @@
 > **目的**：让新接手的 AI Agent 在 5 分钟内理解整个项目、知道东西在哪、知道什么坑绝对不能再踩。
 >
 > 这是 monorepo 的「新人手册」，读完这个 + `README.md` + `ARCHITECTURE.md` 就能开干。
+>
+> **🎯 带着优化任务来的？直接读 [`OPTIMIZATION_PLAN.md`](OPTIMIZATION_PLAN.md)** —— v51 已完成项 + 待办任务清单（T1-T9，含锚点/方案/坑/验收标准）和工作流铁律。
 
 ---
 

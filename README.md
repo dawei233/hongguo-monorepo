@@ -32,6 +32,7 @@ hongguo-monorepo/
 │   ├── ARCHITECTURE.md        # 架构总览 + 数据流 + 设计决策
 │   ├── SECONDARY_DEV.md       # ★ 二次开发指南(API 清单 / 构建 / 扩展点 / 踩坑)
 │   ├── DEPLOY.md              # NAS 部署 + 升级
+│   ├── OPTIMIZATION_PLAN.md   # 优化任务清单（交接文档:待办 T1-T9 + 工作流铁律）
 │   └── CHANGELOG.md           # 变更日志
 └── .github/workflows/       # CI:build-pc.yml + build-android.yml
 ```
@@ -166,6 +167,7 @@ cd android/android
 - 📖 **[docs/SECONDARY_DEV.md](docs/SECONDARY_DEV.md)** — 二次开发指南:环境搭建、代码地图、常用 API、扩展点(新剧源/CDN)、已知坑、打包发布
 - 📖 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — 架构总览 + 数据流 + 设计决策
 - 📖 **[docs/DEPLOY.md](docs/DEPLOY.md)** — NAS Docker 部署
+- 📖 **[docs/OPTIMIZATION_PLAN.md](docs/OPTIMIZATION_PLAN.md)** — 优化任务清单:已完成的 v51 + 待办模块级方案(流式播放/流式净化/waitress/测试护栏)
 - 📖 **[docs/CHANGELOG.md](docs/CHANGELOG.md)** — 变更日志
 
 ---
