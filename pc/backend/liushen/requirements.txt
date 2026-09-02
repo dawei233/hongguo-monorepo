@@ -1,0 +1,6 @@
+betterproto==1.2.5
+pycryptodome==3.18.0
+# Requests 已在 pc/backend/requirements.txt 统一管理(2.32.3),不再单独指定避免版本冲突
+snowland_smx==0.3.1
+# gmssl 被 liushen/flurl/extra.py 第 3 行间接 import,必须装(本地开发机有全局 pip 所以一直没暴露)
+gmssl==3.2.2

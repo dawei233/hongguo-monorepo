@@ -1,0 +1,114 @@
+name: 构建 PC 安装版（Electron + PyInstaller 后端）
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pc/**'
+  workflow_dispatch:
+
+jobs:
+  build-pc:
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 设置 Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 设置 Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: pc/package-lock.json
+
+      # ── 1. PyInstaller 打包红果后端.exe ─────────────────────────────
+      - name: 安装后端依赖
+        working-directory: ./pc/backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller==6.10.0
+          # 关键:必须装主 requirements.txt(里面含 flask==3.0.3、requests==2.32.3 等),
+          # 不能只装 liushen/requirements.txt(只有 betterproto/pycryptodome/snowland_smx/Requests),
+          # 否则 PyInstaller 找不到 flask,运行时 ModuleNotFoundError: No module named 'flask'
+          pip install -r requirements.txt
+
+      # 下载 ffmpeg 到 pc/backend/bin/(关键!hongguo_core.py 运行时需要,详见坑 5/坑 7)
+      # 不提交到 git(.gitignore 排除了 bin/),build 时临时下载,PyInstaller 自动打进 _MEIPASS/bin/
+      # 下载源: gyan.dev release essentials(只含 ffmpeg/ffprobe + 必要 dll,~80MB)
+      - name: 下载 ffmpeg(Windows build essentials)
+        if: success() || failure()
+        working-directory: ./pc/backend
+        run: |
+          mkdir -p bin
+          echo "正在下载 ffmpeg..."
+          curl -L -o ffmpeg.zip "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" --silent --show-error --fail
+          echo "下载完成,解压..."
+          # zip 内有 ffmpeg-*/bin/ 子目录,只取里面的 exe/dll 到 bin/
+          # PowerShell 的 -Filter 不支持数组,改用 -Include(必须配 -Recurse 或 Path 通配)
+          powershell -NoProfile -Command "Expand-Archive -Path ffmpeg.zip -DestinationPath . -Force; Get-ChildItem -Path 'ffmpeg-*/bin' -Recurse -Include *.exe,*.dll | Copy-Item -Destination bin/; Remove-Item -Recurse -Force ffmpeg-*; Remove-Item ffmpeg.zip"
+          echo "ffmpeg 准备完成:"
+          ls -la bin/
+
+      - name: PyInstaller 打包后端
+        working-directory: ./pc/backend
+        run: |
+          # 用全新 workpath（绕开可能的清理拦截），distpath 写到 dist_backend
+          python -m PyInstaller backend.spec \
+            --workpath "$RUNNER_TEMP/_pytmp_pyinst" \
+            --distpath dist_backend \
+            --clean
+
+      # ── 2. Electron + NSIS 安装包 ─────────────────────────────────
+      - name: 安装 Electron 依赖
+        working-directory: ./pc
+        run: npm install
+
+      # 自动递增版本号:从 GITHUB_RUN_NUMBER 派生,保证每次构建文件名都不同
+      # 例:第 51 次 run → 1.0.51,装出 红果漫剧_安装版_Setup_1.0.51.exe
+      # sed 临时改 package.json,build 后由下一段 git restore 恢复,不污染仓库
+      - name: 设置构建版本号
+        working-directory: ./pc
+        run: |
+          BUILD_VERSION="1.0.${GITHUB_RUN_NUMBER}"
+          sed -i "s/\"version\": \"1.0.0\"/\"version\": \"${BUILD_VERSION}\"/" package.json
+          echo "BUILD_VERSION=${BUILD_VERSION}"
+          grep '"version"' package.json
+
+      - name: 构建 NSIS 安装包
+        working-directory: ./pc
+        env:
+          # 禁用 electron-builder 自动发布（避免报错）
+          GH_TOKEN: ''
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --win nsis --publish never
+
+      # 兜底恢复 package.json(防止上一步 sed 改了没还原,污染仓库 working tree)
+      - name: 恢复 package.json 原始版本号
+        if: always()
+        working-directory: ./pc
+        run: git restore package.json
+
+      - name: 整理产物
+        run: |
+          mkdir -p artifacts
+          cp pc/release/*.exe artifacts/ 2>/dev/null || true
+          ls -la artifacts/
+
+      - name: 上传安装包到 Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hongguo-pc-setup
+          path: artifacts/*.exe
+          if-no-files-found: error
+          retention-days: 30

@@ -1,0 +1,14 @@
+# 构建产物
+android/app/build/
+android/.gradle/
+android/build/
+dist/
+发布版/
+*.apk
+# 签名密钥（勿提交）
+signing/
+# Python 后端缓存与编译产物
+android/app/src/main/python/cache/
+android/app/src/main/python/temp/
+android/app/src/main/python/**/__pycache__/
+*.pyc

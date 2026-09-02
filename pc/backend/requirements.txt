@@ -1,0 +1,7 @@
+# PC 后端打包依赖（PyInstaller + 运行时）
+pyinstaller==6.10.0
+flask==3.0.3
+requests==2.32.3
+# BeautifulSoup4 是 hongguo_core.py 第 21 行必用,但 flask 3.0 不再传递依赖它,必须显式列
+beautifulsoup4==4.12.3
+-r liushen/requirements.txt

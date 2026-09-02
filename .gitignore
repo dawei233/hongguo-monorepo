@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+venv/
+env/
+.venv/
+
+# Node / Electron
+node_modules/
+dist/
+build/
+out/
+release/
+*.log
+npm-debug.log*
+
+# Android / Gradle
+android/android/.gradle/
+android/android/build/
+android/android/app/build/
+android/android/local.properties
+android/android/.idea/
+android/android/*.iml
+android/android/captures/
+android/android/.cxx/
+
+# 临时目录
+/tmp_build_*/
+/tmp_*
+
+# 运行时数据 + 发布产物
+android/发布版/edge_profile/
+android/发布版/webview_data/
+android/发布版/*.apk
+pc/发布版/edge_profile/
+pc/发布版/webview_data/
+pc/发布版/红果漫剧Electron版/
+pc/发布版/*_安装版_Setup_*.exe
+pc/发布版/*.exe
+pc/backend/bin/
+pc/backend/dist_backend/
+pc/backend/cache/
+pc/backend/temp/
+pc/backend/ffmpeg_err_*.log
+# 用户观看记录(运行时生成) —— 注意: gitignore 不支持行尾注释,注释必须单独成行(v51 修复)
+pc/backend/prefs.json
+# 设备注册 ID(运行时生成,含个人设备身份,勿入库)
+pc/backend/config.json
+pc/node_modules/
+nas-backend/data/cache/
+nas-backend/cache/
+nas-backend/temp/
+nas-backend/backend/dist_backend/
+nas-backend/config.json
+nas-backend/prefs.json
+nas-backend/entrypoint.sh.tmp
+
+# 工作记忆
+.workbuddy/memory/
+
+# 系统
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~

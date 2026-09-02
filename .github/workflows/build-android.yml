@@ -1,0 +1,44 @@
+name: 构建安卓 APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 设置 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 接受 Android SDK licenses
+        run: yes | sdkmanager --licenses
+
+      - name: 给 Gradle 执行权限
+        run: chmod +x ./android/android/gradlew
+
+      - name: 构建 Release APK
+        working-directory: ./android/android
+        run: ./gradlew assembleRelease
+
+      - name: 上传 APK 到 Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hongguo-manju-release
+          path: android/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30

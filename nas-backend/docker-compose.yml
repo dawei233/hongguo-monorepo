@@ -1,0 +1,11 @@
+services:
+  hongguo:
+    build: .
+    container_name: hongguo
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./data:/data
