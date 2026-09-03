@@ -7,5 +7,3 @@ snowland_smx==1.0.0.post2
 gmssl==3.2.2
 # v52: 生产级 WSGI server，替换 Flask dev server（Werkzeug 在 206+chunked / 长连接上有缺陷）
 waitress==3.0.2
-# v52: 智谱开放平台（GLM 系列）客户端，用于 AI 智能搜剧等 NL→关键词功能
-zhipuai==2.1.5

@@ -45,8 +45,6 @@ a = Analysis(
         "mp4_sanitize",
         # v52: waitress 生产 WSGI
         "waitress",
-        # v52: 智谱开放平台 SDK（AI 智能搜剧）
-        "zhipuai",
     ],
     hookspath=[],
     hooksconfig={},
