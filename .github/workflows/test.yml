@@ -16,9 +16,12 @@ jobs:
         with:
           python-version: '3.11'
       - name: 安装 NAS 后端依赖
+        # 注意:不能直接 -r nas-backend/liushen/requirements.txt（pycryptodome 与主 requirements 冲突），
+        # 显式列出 liushen 真正用到的依赖即可（betterproto/snowland_smx/gmssl）
         run: |
           python -m pip install --upgrade pip
-          pip install -r nas-backend/requirements.txt -r nas-backend/liushen/requirements.txt
+          pip install -r nas-backend/requirements.txt
+          pip install betterproto snowland_smx gmssl
           pip install pytest
       - name: 跑冒烟测试
         working-directory: nas-backend
