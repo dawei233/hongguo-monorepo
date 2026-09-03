@@ -89,4 +89,11 @@ if __name__ == "__main__":
     port = int(os.environ.get("HONGGUO_PORT", "5137"))
     print(f"[backend] 红果漫剧后端服务: http://127.0.0.1:{port}", flush=True)
     # 不自动开浏览器（窗口由 Electron 管理）
-    app.run(host="127.0.0.1", port=port, debug=False, threaded=True)
+    # v52: 优先使用 waitress，缺失则回退 Flask dev server
+    try:
+        from waitress import serve
+        print(f"[backend] 使用 waitress 生产服务器 (threads=8)", flush=True)
+        serve(app, host="127.0.0.1", port=port, threads=8, ident="hongguo-pc-backend")
+    except ImportError:
+        print(f"[backend] waitress 未安装,回退 Flask dev server", flush=True)
+        app.run(host="127.0.0.1", port=port, debug=False, threaded=True)

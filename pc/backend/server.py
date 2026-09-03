@@ -15,6 +15,9 @@ from flask import Flask, jsonify, request, send_file, send_from_directory, Respo
 import requests as _requests
 from urllib.parse import urlparse, parse_qs, quote
 
+# v52: 共用 hongguo_core 的 SESSION（连接池 + GET 自动重试）；
+# _requests 保留用于特殊场景（流式下载、显式控制等），普通 GET 走 SESSION。
+
 APP_DIR = Path(__file__).resolve().parent
 if getattr(sys, "frozen", False):
     APP_DIR = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
@@ -36,6 +39,19 @@ _on_shutdown = None
 # 用户数据（收藏/播放记录）——存后端文件，不依赖浏览器 profile
 PREFS_PATH = DATA_DIR / "prefs.json"
 _prefs_lock = threading.Lock()
+
+def _serve_production(app, host: str, port: int) -> None:
+    """v52: 生产级 WSGI 替换 Werkzeug dev server（同 nas-backend/server.py 实现）。"""
+    try:
+        from waitress import serve
+        print(f"[serve] 使用 waitress 生产服务器")
+        serve(app, host=host, port=port, threads=8, ident="hongguo-pc-backend")
+        return
+    except ImportError:
+        pass
+    print(f"[serve] waitress 未安装,回退 Flask dev server (建议 pip install waitress)")
+    app.run(host=host, port=port, debug=False, threaded=True)
+
 
 # v49: NAS 同步 —— 观看记录/收藏以 NAS 为权威（安卓/PC 共享），本地 prefs.json 作为离线缓存
 # NAS_URL: 你的 NAS 后端地址，通过环境变量 NAS_URL 覆盖
@@ -268,6 +284,32 @@ def api_search():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+# v52: AI 智能搜剧（同 nas-backend/server.py）—— 自然语言 → 智谱 GLM 提取关键词 → search_series
+@app.route("/api/search_ai")
+def api_search_ai():
+    q = request.args.get("q", "").strip()
+    page = int(request.args.get("page") or 1)
+    tab = request.args.get("tab", "").strip()  # ""=全部, 1=短剧, 2=漫剧
+    if not q:
+        return jsonify({"ok": False, "error": "q 必填"}), 400
+    try:
+        kws = hongguo_core.ai_extract_keywords(q)
+    except Exception as _e:
+        return jsonify({"ok": False, "error": f"AI 解读失败: {_e}"}), 502
+    keyword = " ".join(kws)
+    print(f"[search_ai] '{q}' → 关键词: {kws} → 搜: '{keyword}'", flush=True)
+    try:
+        result = search_series(keyword, page, tab)
+    except Exception as _e:
+        return jsonify({"ok": False, "error": str(_e)}), 500
+    return jsonify({
+        "ok": True,
+        "ai_query": q,
+        "ai_keywords": kws,
+        **result,
+    })
+
+
 # v46: 手工录入剧集(quickapp / 字节内部 sid,web search 搜不到的内容)
 @app.route("/api/manual_series", methods=["GET", "POST"])
 def api_manual_series():
@@ -413,72 +455,15 @@ def api_play():
 
     # 直链优先（默认）：CDN 地址浏览器直接播，绕开 ffmpeg 单连接下载瓶颈
     if mode != "download":
-        # 选择优先画质源
-        # - HQ=1080p/App 源（HEVC 原生，需客户端支持 HEVC 硬解）
-        # - 720p/player 源（H.264 720p 兼容性最强，所有设备都能播）
-        # 客户端声明 no_hevc → 强制走 720p H.264（保证播放）；否则尝试 1080p HEVC
-        # 逻辑修复版（v23+）：
-        #   - want_hq=True（HQ 1080p）→ 先试 App 1080p HEVC 源
-        #   - 任意路径找到 source → real_url 不为空
-        #   - no_hevc=True → 直接跳过所有 HEVC 路径（包括 fallback），找不到 H.264 就报错
-        want_hq = (not no_hevc) and (quality in ("1080p", "hq", "high", "") or quality.startswith("video_5"))
-        real_url = ""
-        used_source = ""
-        # 步骤1：HQ= App 签名接口（1080p，可能 HEVC）— 仅 want_hq=True 时尝试
-        if want_hq:
-            try:
-                import time as _t
-                # v51: 8 次×3s 阻塞太久（最坏 3 分钟），收敛到 3 次×2s；
-                # info 预初始化，避免首次 resolve 抛异常时 NameError
-                info = {}
-                for _try in range(3):
-                    info = resolve_video_url(vid, quality)
-                    url = info.get("url", "")
-                    if url and any(k in url for k in ("hgweb", "reading-videocdn", "v11-", "v26-", "v3-hgweb")):
-                        break
-                    _t.sleep(2)
-                if info.get("url"):
-                    real_url = info["url"]
-                    used_source = "app_sign_1080p"
-                    print(f"[play] App HQ 源 ({info.get('quality')}): {real_url[:60]}")
-            except Exception as _e:
-                print(f"[play] App HQ 源失败: {_e}")
-        # 步骤2：720p/player 页 H.264 源（兼容回退，必试）
-        if not real_url and sid:
-            try:
-                _html = _requests.get(
-                    f"https://hongguoduanju.com/player/{sid}/{vid}",
-                    headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-                             "Accept-Encoding": "identity"},
-                    timeout=15).text
-                import re as _re
-                _m = _re.search(r'"main_url":"([^"]+)"', _html)
-                if _m:
-                    real_url = _m.group(1).replace("\\u002F", "/")
-                    used_source = "player_720p"
-                    info = {"quality": "720p", "qualities": [{"label": "720p", "key": "video_4", "height": 720}], "total_size": 0}
-                    print(f"[play] player 页 H.264 源: {real_url[:60]}")
-            except Exception as _e:
-                print(f"[play] player 页解析失败: {_e}")
-        # 步骤3：App 接口其他 quality（兜底） — 仅 no_hevc=False 时尝试
-        if not real_url and not no_hevc:
-            try:
-                for _alt_q in ("720p", "576p", "480p", "360p"):
-                    info = resolve_video_url(vid, _alt_q)
-                    if info.get("url"):
-                        real_url = info["url"]
-                        used_source = f"app_sign_{_alt_q}"
-                        print(f"[play] App {_alt_q} 兑底: {real_url[:60]}")
-                        break
-            except Exception as _e:
-                print(f"[play] App 兑底失败: {_e}")
-        # 失败兜底：找不到任何源
-        if not real_url:
-            err_msg = "无 720p/H.264 源（player 页解析失败）"
-            if no_hevc:
-                err_msg = "客户端不支持 HEVC，且本剧无可用 H.264 源。请用桌面端访问 PC 版"
-            print(f"[play] 失败: {err_msg}", flush=True)
-            return jsonify({"ok": False, "error": err_msg, "no_hevc_only": no_hevc}), 400
+        # v52: 三段找源抽到 hongguo_core.resolve_with_fallback(同 nas-backend/server.py)
+        try:
+            _r = hongguo_core.resolve_with_fallback(vid, sid=sid, quality=quality, no_hevc=no_hevc)
+            real_url = _r["url"]
+            used_source = _r["source"]
+            info = _r["info"]
+        except Exception as _e:
+            print(f"[play] 失败: {_e}", flush=True)
+            return jsonify({"ok": False, "error": str(_e), "no_hevc_only": no_hevc}), 400
         if real_url:
             # 关键：把视频完整下载到 NAS 本地 → WebView 加载同源 HTTP（NAS 内网），
             # 绕开 WebView 直连 CDN 的所有防盗链/混合内容/TLS指纹问题
@@ -518,7 +503,7 @@ def api_play():
                 h264_path = local_dir / f"{vid}.mp4"     # 净化产物（最终交付前端）
                 if not h264_path.exists() or h264_path.stat().st_size < 1024:
                     if not raw_path.exists() or raw_path.stat().st_size < 1024:
-                        with _requests.get(real_url, headers={
+                        with hongguo_core.SESSION.get(real_url, headers={
                             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
                             "Accept-Encoding": "identity",
                         }, stream=True, timeout=180) as r:
@@ -643,10 +628,16 @@ def api_cdn_proxy():
     """CDN 代理（无 Referer）：WebView 加载 /api/cdn?u=<原直链>，
     后端用 Python 抓 CDN（无 Referer → v26/v11 类 206）流式返回。
     透传 Range 支持拖进度条。绕开 WebView 直连 CDN 的环境差异（TLS 指纹等）。
+    v52: 加域名白名单（同 nas-backend/server.py），防止被当任意 HTTP 代理滥用。
     """
     target = request.args.get("u", "").strip()
     if not target or not target.startswith("http"):
-        return "missing u", 400
+        return jsonify({"ok": False, "error": "missing u"}), 400
+    # v52: 域名白名单校验
+    parsed = urlparse(target)
+    if not _is_cdn_host_allowed(parsed.netloc):
+        print(f"[cdn-proxy] 拒绝非白名单域名: {parsed.netloc}", flush=True)
+        return jsonify({"ok": False, "error": "host not allowed"}), 403
     # 关键：不带 Referer（v26/v11 类 CDN 对无 Referer 请求返回 206；带 Referer 反而 403）
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
@@ -656,12 +647,12 @@ def api_cdn_proxy():
     if range_header:
         headers["Range"] = range_header
     try:
-        upstream = _requests.get(target, headers=headers, stream=True, timeout=30)
+        upstream = hongguo_core.SESSION.get(target, headers=headers, stream=True, timeout=30)
     except Exception as e:
-        return f"upstream error: {e}", 502
+        return jsonify({"ok": False, "error": f"upstream error: {e}"}), 502
     if upstream.status_code in (403, 404):
         upstream.close()
-        return "upstream rejected", 502
+        return jsonify({"ok": False, "error": "upstream rejected"}), 502
     def gen():
         try:
             for chunk in upstream.iter_content(64 * 1024):
@@ -985,7 +976,7 @@ def run_server(port: int = 5127, open_browser: bool = True, host: str = "127.0.0
             webbrowser.open(f"http://127.0.0.1:{port}")
         threading.Thread(target=_open, daemon=True).start()
     print(f"红果漫剧播放器: http://{host}:{port}")
-    app.run(host=host, port=port, debug=False, threaded=True)
+    _serve_production(app, host=host, port=port)
 
 
 if __name__ == "__main__":

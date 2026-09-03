@@ -18,7 +18,26 @@ from typing import Optional, Dict, Any, List, Tuple
 from urllib.parse import quote, urljoin, urlparse, parse_qs
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
+
+# ─── 全局 HTTP Session（v52）───────────────────────────────────────────────
+# 此前全项目用裸 requests.get/post，每次新建 TCP+TLS、无连接复用、无自动重试；
+# 搜索 126 页或解析一集要打多个请求时握手开销 + 服务器抖动都让首字节延迟飘忽。
+# 改用全局 SESSION：连接池复用 + 仅对 GET 在 429/5xx 时自动指数退避重试 2 次。
+# allowed_methods=["GET"] 关键：POST（如签名视频接口、设备注册）绝不允许
+# 自动重试——签名请求重放会被服务端拒，设备注册有自己的手工重试逻辑。
+_SESSION_RETRY = Retry(
+    total=2,
+    backoff_factor=0.5,
+    status_forcelist=[429, 500, 502, 503],
+    allowed_methods=["GET"],
+    raise_on_status=False,
+)
+SESSION = requests.Session()
+SESSION.mount("https://", HTTPAdapter(max_retries=_SESSION_RETRY))
+SESSION.mount("http://", HTTPAdapter(max_retries=_SESSION_RETRY))
 
 # ─── 路径配置 ────────────────────────────────────────────────────────────────
 def _is_frozen() -> bool:
@@ -318,7 +337,7 @@ def sign_json_request(url: str, body_obj: Dict[str, Any]) -> Tuple[str, Dict[str
 # ─── 搜索 / 详情（官网 H5）────────────────────────────────────────────────────
 
 def fetch_text(url: str, timeout: int = 20) -> str:
-    resp = requests.get(url, headers={"User-Agent": WEB_UA,
+    resp = SESSION.get(url, headers={"User-Agent": WEB_UA,
                                       "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                                       "Accept-Language": "zh-CN,zh;q=0.9",
                                       "Accept-Encoding": "identity",
@@ -430,7 +449,7 @@ def add_manual_series(item: Dict[str, Any]) -> int:
 def fetch_category_page(page_num: int, tab: str = TAB_VIDEO, sort_type: int = 1) -> List[Dict[str, Any]]:
     """调用官方分类 API 抓一页剧集数据"""
     try:
-        resp = requests.get(
+        resp = SESSION.get(
             CATEGORY_API,
             params={"page_num": page_num, "tab": tab, "sort_type": sort_type},
             headers={"User-Agent": WEB_UA, "Accept": "application/json",
@@ -600,7 +619,7 @@ def search_suggestion(keyword: str) -> List[Dict[str, Any]]:
     """
     try:
         web_id = str(int(time.time() * 1000))[-16:]  # 简单 web_id
-        resp = requests.get(
+        resp = SESSION.get(
             f"{SITE_BASE}/incent_resource/suggestion",
             params={"web_id": web_id, "query": keyword, "count": 10, "app_id": "8662"},
             headers={"User-Agent": WEB_UA, "Accept": "application/json",
@@ -808,13 +827,13 @@ def _browse_load_sitemap(force: bool = False):
         pass
     ids: set = set()
     try:
-        r = requests.get(f"{SITE_BASE}/sitemap.xml",
+        r = SESSION.get(f"{SITE_BASE}/sitemap.xml",
                          headers={"User-Agent": WEB_UA, "Accept-Encoding": "identity"}, timeout=25)
         shards = re.findall(r"<loc>([^<]+/index\d+\.xml)</loc>", r.text)
         print(f"[browse] sitemap 分片: {len(shards)}")
         for sh in shards:
             try:
-                rr = requests.get(sh,
+                rr = SESSION.get(sh,
                                   headers={"User-Agent": WEB_UA, "Accept-Encoding": "identity"}, timeout=25)
                 ids |= set(re.findall(r"detail\?series_id=(\d+)", rr.text))
             except Exception:
@@ -950,6 +969,12 @@ def _browse_remaining() -> int:
 
 
 # 启动时恢复浏览缓存 + 后台线程持续预抓全量目录
+# v52: 后台预抓上限 BROWSE_PREFETCH_LIMIT —— 之前会对 sitemap 全部 47 万 ID 永不停歇抓取，
+# 对官方站点持续压力 + 白耗 NAS 带宽；用户滚动触发的 browse_ensure（按需）已足够，
+# 后台只需填个"启动到首次滚动之间"的缓冲即可。超过上限后长眠 1 小时（保留进程可调参）。
+BROWSE_PREFETCH_LIMIT = 2000
+_BROWSE_PREFETCH_DONE = False  # 上限达成的持久标记（避免每次循环重判断）
+
 def _browse_background_worker():
     """后台持续抓取 browse 缓存（并发预抓：用户滚动本地索引期间，
     全量目录已在后台积累，滚到 browse 区时缓存基本就绪）"""
@@ -961,11 +986,18 @@ def _browse_background_worker():
                 time.sleep(10)
                 continue
             with _BROWSE_LOCK:
+                # v52: 达上限后长眠；browse_ensure() 的按需抓取仍可继续（不受此限制）
+                if _BROWSE_PREFETCH_DONE or _SITEMAP_CURSOR >= min(
+                        BROWSE_PREFETCH_LIMIT, len(_SITEMAP_IDS)):
+                    _BROWSE_PREFETCH_DONE = True
+                    time.sleep(3600)
+                    continue
                 if _SITEMAP_CURSOR >= len(_SITEMAP_IDS):
                     time.sleep(5)
                     continue
                 batch = []
-                while len(batch) < 8 and _SITEMAP_CURSOR < len(_SITEMAP_IDS):
+                while len(batch) < 8 and _SITEMAP_CURSOR < len(_SITEMAP_IDS) \
+                        and _SITEMAP_CURSOR < BROWSE_PREFETCH_LIMIT:
                     batch.append(_SITEMAP_IDS[_SITEMAP_CURSOR])
                     _SITEMAP_CURSOR += 1
             results = []
@@ -1213,7 +1245,8 @@ def resolve_video_url(vid: str, quality: str = "") -> Dict[str, Any]:
         "mixed_video_id_map": {"1004": [vid]},
     }
     signed_url, headers, body = sign_json_request(target_url, post_payload)
-    resp = requests.post(signed_url, headers=headers, data=body, timeout=25)
+    # v52: 走 SESSION 享受连接池；Retry(allowed_methods=["GET"]) 不会重试 POST，安全
+    resp = SESSION.post(signed_url, headers=headers, data=body, timeout=25)
     data = resp.json()
     entry = (data.get("data") or {}).get(vid)
     if not entry:
@@ -1224,7 +1257,7 @@ def resolve_video_url(vid: str, quality: str = "") -> Dict[str, Any]:
     fb = vm.get("fallback_api")
     fb_url = fb if isinstance(fb, str) else (fb.get("fallback_api") if isinstance(fb, dict) else "")
 
-    resp2 = requests.get(fb_url, headers={"User-Agent": USER_AGENT}, timeout=25)
+    resp2 = SESSION.get(fb_url, headers={"User-Agent": USER_AGENT}, timeout=25)
     d2 = resp2.json()
     video_data = d2.get("video_info", {}).get("data", {})
     if not video_data:
@@ -1292,7 +1325,165 @@ def resolve_video_url(vid: str, quality: str = "") -> Dict[str, Any]:
     }
 
 
-# ─── 视频流式下载（后台任务）─────────────────────────────────────────────────
+# v52: 三段找源纯函数（v51 之前散在 /api/play 里约 60 行，两份 server.py 完全重复）
+# 优先级:App 签名 HQ (HEVC/1080p) → player 页 H.264 (720p 兜底) → App 逐档位兜底
+# 返回:{"url","source","info"}  失败 raise RuntimeError(可读错误信息)
+# 域名白名单: "hgweb"/"reading-videocdn"/"v11-"/"v26-"/"v3-hgweb" 关键词匹配任一即认可
+_CDN_HOST_KEYWORDS = ("hgweb", "reading-videocdn", "v11-", "v26-", "v3-hgweb")
+
+
+def resolve_with_fallback(vid: str, sid: str = "", quality: str = "",
+                          no_hevc: bool = False) -> Dict[str, Any]:
+    """按优先级解析可播放 CDN URL,直至找到带可接受 host 关键词的源。
+
+    no_hevc=True: 客户端不支持 HEVC,跳过所有 App 签名接口(可能返回 HEVC),只走 player 页 H.264。
+    """
+    import time as _t
+    import re as _re
+
+    want_hq = (not no_hevc) and (
+        quality in ("1080p", "hq", "high", "") or quality.startswith("video_5")
+    )
+
+    # 步骤 1:App 签名 HQ 源(HEVC/1080p),仅 want_hq=True
+    if want_hq:
+        try:
+            info: Dict[str, Any] = {}
+            for _try in range(3):
+                info = resolve_video_url(vid, quality)
+                url = info.get("url", "")
+                if url and any(k in url for k in _CDN_HOST_KEYWORDS):
+                    print(f"[resolve] App HQ 源 ({info.get('quality')}): {url[:60]}")
+                    return {"url": url, "source": "app_sign_1080p", "info": info}
+                _t.sleep(2)
+        except Exception as _e:
+            print(f"[resolve] App HQ 源失败: {_e}")
+
+    # 步骤 2:player 页 H.264 720p(兼容回退,必试,前提:有 sid)
+    if sid:
+        try:
+            _html = SESSION.get(
+                f"https://hongguoduanju.com/player/{sid}/{vid}",
+                headers={"User-Agent": WEB_UA, "Accept-Encoding": "identity"},
+                timeout=15,
+            ).text
+            _m = _re.search(r'"main_url":"([^"]+)"', _html)
+            if _m:
+                url = _m.group(1).replace("\\u002F", "/")
+                info = {
+                    "quality": "720p",
+                    "qualities": [{"label": "720p", "key": "video_4", "height": 720}],
+                    "total_size": 0,
+                }
+                print(f"[resolve] player 页 H.264 源: {url[:60]}")
+                return {"url": url, "source": "player_720p", "info": info}
+        except Exception as _e:
+            print(f"[resolve] player 页解析失败: {_e}")
+
+    # 步骤 3:App 接口逐档位兜底(720p/576p/480p/360p) — 仅 no_hevc=False
+    if not no_hevc:
+        try:
+            for _alt_q in ("720p", "576p", "480p", "360p"):
+                info = resolve_video_url(vid, _alt_q)
+                if info.get("url"):
+                    print(f"[resolve] App {_alt_q} 兜底: {info['url'][:60]}")
+                    return {"url": info["url"], "source": f"app_sign_{_alt_q}", "info": info}
+        except Exception as _e:
+            print(f"[resolve] App 兜底失败: {_e}")
+
+    # 全部失败
+    if no_hevc:
+        raise RuntimeError("客户端不支持 HEVC,且本剧无可用 H.264 源。请用桌面端访问 PC 版")
+    raise RuntimeError("无 720p/H.264 源（player 页解析失败）")
+
+
+# ─── 智谱开放平台 AI 搜索 (v52) ─────────────────────────────────────────────
+# 智谱 GLM 系列 API 兼容 OpenAI Chat Completions 协议,直接走 SESSION 调
+# https://open.bigmodel.cn/api/paas/v4/chat/completions,无需安装 zhipuai SDK。
+# Key 来自环境变量 ZHIPU_API_KEY;未配置时 /api/search_ai 返回明确错误(前端降级提示)。
+# 默认用 glm-4-flash(免费、低延迟);高端档可换 glm-4-air / glm-4-plus。
+
+ZHIPU_API_BASE = "https://open.bigmodel.cn/api/paas/v4"
+ZHIPU_DEFAULT_MODEL = "glm-4-flash"  # 免费额度大,适合短 NL→关键词任务
+
+# 关键词提取系统提示词:让 GLM 严格返回 JSON 数组,便于后端解析
+_AI_SEARCH_PROMPT = """你是视频搜索关键词提取助手。用户会用自然语言描述想看什么(如"想看重生复仇类短剧"、"甜宠漫剧推荐")。
+请从中提取 1-3 个最适合在短剧/漫剧平台搜索的关键词,以 JSON 数组形式返回,只输出 JSON 数组,不要其他内容、不要 markdown 代码块。
+- 短剧/电视剧题材类:重 生 / 复仇 / 甜宠 / 战神 / 玄幻 / 悬疑 / 总裁 / 校园 / 古装
+- 漫剧类:漫剧 / 沙雕动画 / 搞笑 / 动物
+- 类型标识:用户说"短剧"或没特别说 → 加 "短剧";说"漫剧/漫画" → 加 "漫剧"
+
+示例(只参考格式,不是固定答案):
+"想看重生复仇类短剧" → ["重生","复仇"]
+"推荐个甜宠的漫剧" → ["甜宠","漫剧"]
+"搞笑的短剧" → ["搞笑","短剧"]
+"沙雕动画推荐" → ["沙雕动画"]
+
+用户描述:"""
+
+
+def ai_extract_keywords(query: str, model: str = ZHIPU_DEFAULT_MODEL,
+                        timeout: float = 15.0) -> List[str]:
+    """调智谱 GLM 提取 1-3 个搜索关键词。失败抛 RuntimeError(可读错误信息)。
+
+    key 从环境变量 ZHIPU_API_KEY 读;若未配置或为空,直接 RuntimeError("未配置 ZHIPU_API_KEY")。
+    """
+    import json as _json
+    key = (os.environ.get("ZHIPU_API_KEY") or "").strip()
+    if not key:
+        raise RuntimeError("未配置 ZHIPU_API_KEY 环境变量 (AI 搜剧未启用)")
+    query = (query or "").strip()
+    if not query:
+        raise RuntimeError("搜索词为空")
+    url = f"{ZHIPU_API_BASE}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": _AI_SEARCH_PROMPT},
+            {"role": "user", "content": query},
+        ],
+        "temperature": 0.3,
+        "max_tokens": 80,
+    }
+    try:
+        resp = SESSION.post(url, headers=headers, json=payload, timeout=timeout)
+    except Exception as _e:
+        raise RuntimeError(f"智谱 API 请求失败: {_e}") from _e
+    if resp.status_code != 200:
+        # 截短 body,避免错误信息过长
+        raise RuntimeError(
+            f"智谱 API 返回 {resp.status_code}: {resp.text[:200]}"
+        )
+    try:
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"].strip()
+    except Exception as _e:
+        raise RuntimeError(f"智谱 API 响应解析失败: {_e}; body={resp.text[:200]}")
+    # content 应当是纯 JSON 数组;兼容可能被包在 ```json ... ``` 里的情况
+    if content.startswith("```"):
+        # 去掉 markdown 围栏
+        lines = content.splitlines()
+        content = "\n".join(l for l in lines if not l.strip().startswith("```"))
+    try:
+        kw_list = _json.loads(content)
+    except Exception as _e:
+        raise RuntimeError(
+            f"智谱 API 返回非 JSON: {content[:100]}"
+        ) from _e
+    if not isinstance(kw_list, list):
+        raise RuntimeError(f"智谱 API 返回格式异常: {type(kw_list).__name__}")
+    # 截短到 3 个,过滤空白
+    kws = [str(k).strip() for k in kw_list if str(k).strip()][:3]
+    if not kws:
+        raise RuntimeError("智谱 API 未提取到任何关键词")
+    return kws
+
+
+
 
 class VideoStreamManager:
     """管理视频下载任务：ffmpeg 解密到本地文件，前端边下边播"""

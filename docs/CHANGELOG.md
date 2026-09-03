@@ -32,6 +32,38 @@
 - `/api/play` 默认模式仍是"完整下载+净化后才返回"（起播慢），真正的异步流式播放需要重构播放链路，本次未动
 
 
+---
+
+## v52 (2026-09-03) — 性能优化 + 智谱 AI 搜剧
+
+### 优化（按 OPTIMIZATION_PLAN 批次 A/B/C）
+- ⚡ **T3**: dev server → waitress 生产级 WSGI（纯 Python、Windows 友好；解决 Werkzeug 206+chunked 边界 bug；threads=8）。`server.py` / `main_server.py` 三处替换，缺包时自动回退
+- ⚡ **T4**: 裸 `requests.get/post` → 全局 `SESSION`（连接池复用 + GET 在 429/5xx 时指数退避重试 2 次）。`Retry(allowed_methods=["GET"])` 关键：签名视频接口/设备注册 POST 绝不允许自动重放。9 处 GET + 1 处签名 POST 全部迁移，仅 `device_register` 一处保留裸 POST
+- ⚡ **T5**: browse 后台 worker 上限 `BROWSE_PREFETCH_LIMIT=2000`，到达后长眠 1 小时（保留进程可调参）。之前对 sitemap 47 万 ID 永不停歇抓取，对官方站点持续压力+白耗带宽；按需抓取 (`browse_ensure`) 不受限制
+- ⚡ **T7**: `/api/play` 三段找源逻辑（60 行）抽到 `hongguo_core.resolve_with_fallback()` 纯函数，`api_play` → 3 行调用。两份 `server.py` 60 行重复彻底消除
+- 🔒 **T9**: `/api/cdn` 代理加域名白名单（`CDN_ALLOW_SUFFIXES` + `CDN_ALLOW_KEYWORDS` 双重匹配），防被当任意 HTTP 代理跳板滥用
+- 🧪 **T8**: 11 → 13 个冒烟测试固化为 `nas-backend/tests/test_smoke.py`；新增 `.github/workflows/test.yml`（ubuntu + Python 3.11，跑 pytest + `sync_core.py --check`）
+
+### 新功能
+- 🤖 **智谱开放平台 API · AI 智能搜剧**：自然语言描述 → 智谱 GLM 提取 1-3 个关键词 → 走现有 `search_series` 搜索
+  - 后端: `GET /api/search_ai?q=想看重生复仇类短剧&tab=1`
+  - 模型: `glm-4-flash`（免费额度大、低延迟），通过 OpenAI 兼容协议直连无需 SDK
+  - key: 环境变量 `ZHIPU_API_KEY`，未配置时返回 502 + 明确错误（前端降级提示用普通搜索）
+  - 前端: 搜索栏新增紫色 `🤖 AI 搜` 按钮；触发后 toast 显示"AI 解读: 重生 / 复仇"
+  - prompt 严格约束 GLM 返回 JSON 数组（兼容 markdown 围栏容错）
+
+### 依赖
+- 新增 `waitress==3.0.2`、`zhipuai==2.1.5`（CI 装，PyInstaller 打包时 bundled）
+- `backend.spec` hiddenimports 补 `waitress` / `zhipuai`
+
+### 已知未做
+- **T1 播放链路流式化**：用户本次明确跳过（动主播放链路风险大，需真机回归）
+- **T2 mp4_sanitize 流式重写**：内存优化，本轮未做（O(moov) → O(文件大小) 重写，需逐 box byte-identical 验证）
+- **T6 详情页 JSON 解析**：需真网验证官方页面 JSON 结构，本轮未做
+
+### 关联 commit
+- v52 性能优化 + AI 搜剧（本仓库第二个功能性 commit）
+
 ## v49 (2026-08-22) — Monorepo 重构
 
 ### 变更

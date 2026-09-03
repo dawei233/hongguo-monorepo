@@ -540,7 +540,8 @@ body.fs-mode.pv-active .topbar { display: none !important; }
   </div>
   <div class="searchbox">
     <input id="kw" type="text" placeholder="搜索剧名 / 题材 / 关键词，如：离婚、重生、玄幻、甜宠…" onkeydown="if(event.key==='Enter')doSearch()">
-    <button class="btn" onclick="doSearch()">搜索</button>
+    <button class="btn" id="btn-search" onclick="doSearch()">搜索</button>
+    <button class="btn" id="btn-search-ai" onclick="doSearchAI()" title="AI 智能搜剧：用自然语言描述想看什么，GLM 提取关键词搜索" style="background:linear-gradient(135deg,#7b2ff7,#c471ed)">🤖 AI 搜</button>
   </div>
   <button class="btn ghost" onclick="window.open('https://hongguoduanju.com','_blank')" title="打开官网">官网</button>
   <button class="btn ghost" id="btn-cache-panel" onclick="openCachePanel()" title="缓存管理">📁 缓存</button>
@@ -871,6 +872,36 @@ function showSkeleton() {
   }
 }
 function hideSkeleton() { $('skeleton').style.display = 'none'; }
+
+// v52: AI 智能搜剧 —— 自然语言 → 智谱 GLM 提取关键词 → /api/search_ai
+async function doSearchAI() {
+  const keyword = $('kw').value.trim();
+  if (!keyword) { toast('请输入想看的剧（如"想看重生复仇类短剧"）'); return; }
+  currentKeyword = keyword;
+  showSkeleton();
+  listPage = 1; listTotal = 0; listEnded = false;
+  const aiBtn = $('btn-search-ai');
+  if (aiBtn) { aiBtn.disabled = true; aiBtn.textContent = '⏳ AI 解读中…'; }
+  try {
+    const res = await fetch(`/api/search_ai?q=${encodeURIComponent(keyword)}&tab=${currentTab}&page=1`);
+    const data = await res.json();
+    hideSkeleton();
+    if (!data.ok) {
+      const errMsg = data.error || '未知错误';
+      toast('AI 搜剧失败: ' + errMsg, 3500);
+      return;
+    }
+    if (data.ai_keywords && data.ai_keywords.length) {
+      toast(`AI 解读: ${data.ai_keywords.join(' / ')}`, 2500);
+    }
+    renderGrid(data.items, data.total, keyword, data.fallback, data.message, true);
+  } catch (e) {
+    hideSkeleton();
+    toast('AI 搜剧失败: ' + e.message, 3500);
+  } finally {
+    if (aiBtn) { aiBtn.disabled = false; aiBtn.textContent = '🤖 AI 搜'; }
+  }
+}
 
 async function doSearch(kw) {
   const keyword = (kw !== undefined ? kw : $('kw').value).trim();

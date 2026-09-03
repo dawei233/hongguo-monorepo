@@ -4,4 +4,8 @@ flask==3.0.3
 requests==2.32.3
 # BeautifulSoup4 是 hongguo_core.py 第 21 行必用,但 flask 3.0 不再传递依赖它,必须显式列
 beautifulsoup4==4.12.3
+# v52: 生产级 WSGI server，替换 Flask dev server
+waitress==3.0.2
+# v52: 智谱开放平台客户端（可选，未配置 ZHIPU_API_KEY 时 AI 搜剧自动降级为关键词搜索）
+zhipuai==2.1.5
 -r liushen/requirements.txt
