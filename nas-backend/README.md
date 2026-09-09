@@ -185,7 +185,7 @@ services:
 
 ```bash
 # 首次部署
-ssh admin@<NAS_IP>
+ssh <NAS_USER>@<NAS_IP>
 cd <部署目录>/nas-backend
 sudo docker compose build --no-cache
 sudo docker compose up -d

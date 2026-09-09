@@ -95,7 +95,7 @@ hongguo-monorepo/
 | 电脑本体 | <LAN_IP> | 开发 + PC 版安装位置 |
 | GitHub | dawei233/hongguo-monorepo | 私有仓库 |
 
-- **SSH NAS**：`admin@<NAS_IP> -p <SSH_PORT>`，sudo 密码 = admin 密码
+- **SSH NAS**：`<NAS_USER>@<NAS_IP> -p <SSH_PORT>`，sudo 密码 = 该用户的登录密码（走环境变量传入，不入库）
 - **远程 sudo 正确姿势**：`sudo -S -p '' bash -c '整条命令'`（`-S` 从 stdin 读密码、`-p ''` 关提示、`bash -c` 包裹避免 `&&` 只作用于第一条）
 
 ---
@@ -108,8 +108,8 @@ hongguo-monorepo/
 
 **正确流程**：
 ```bash
-ssh admin@<NAS_IP> -p <SSH_PORT>
-cd /vol5/1000/Docker/hongguo
+ssh <NAS_USER>@<NAS_IP> -p <SSH_PORT>
+cd <部署目录>/hongguo
 sudo git pull                    # 1. 拉新代码
 cd nas-backend
 sudo docker compose build --no-cache   # 2. 重新构建镜像（关键：--no-cache）
@@ -203,7 +203,7 @@ sudo docker exec hongguo bash -c 'rm -f /data/cache/videos/*.mp4 /data/cache/vid
 
 ```bash
 # 看 NAS 容器日志
-ssh admin@<NAS_IP> -p <SSH_PORT>
+ssh <NAS_USER>@<NAS_IP> -p <SSH_PORT>
 sudo docker logs hongguo --tail 50 -f
 
 # 测试 API

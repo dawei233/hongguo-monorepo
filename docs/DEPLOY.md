@@ -20,7 +20,7 @@
 - NAS 端口 `8000` 需开放(或配反向代理)
 
 ### 1.3 账号
-- SSH:`admin@<NAS_IP>`,密码/密钥按你的环境配置
+- SSH:`<NAS_USER>@<NAS_IP>`,密码/密钥按你的环境配置
 
 ---
 
@@ -30,7 +30,7 @@
 
 ```bash
 # 方式 A:从 git 仓库拉
-ssh admin@<NAS_IP>
+ssh <NAS_USER>@<NAS_IP>
 cd <部署目录>          # 或你习惯的部署目录
 sudo git clone <你的仓库地址> hongguo
 cd hongguo
@@ -78,14 +78,14 @@ curl "http://<NAS_IP>:8000/api/search?keyword=短剧"
 # 本地
 git push origin main
 # NAS
-ssh admin@<NAS_IP>
+ssh <NAS_USER>@<NAS_IP>
 cd <部署目录>/hongguo
 sudo git pull
 ```
 
 **方式 B:SFTP/SCP 上传**
 ```bash
-scp -r nas-backend/ admin@<NAS_IP>:<部署目录>/hongguo/
+scp -r nas-backend/ <NAS_USER>@<NAS_IP>:<部署目录>/hongguo/
 ```
 
 ### 3.2 重建容器
