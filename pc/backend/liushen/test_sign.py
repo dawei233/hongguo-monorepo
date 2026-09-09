@@ -58,11 +58,11 @@ def query_account(dev={}, mobile="", proxys=None):
         "store-region": "cn-gz",
         "store-region-src": "did",
         "install_id": "REDACTED_INSTALL_ID",
-        "ttreq": "1$575c626c8bdde914622dc1bb92f10c79a8406792",
-        "odin_tt": "8ad6aa7950339dbc65ceea85fed358ef4b88004b5ac0c9e09d7eb8bea1df25c17c928818199cf0066f4231ac1fca45faefb47744bd45d9cd34ff371e621c61e984e9059cf7e7fd5b6f9eedcac2e4ecf4",
-        "passport_csrf_token": "5705bbb0d9251352fcf0e41c72ba2d36",
-        "passport_csrf_token_default": "5705bbb0d9251352fcf0e41c72ba2d36",
-        "d_ticket": "ec2c21b1f8183448987c2de3c5ef765a926d4"
+        "ttreq": "REDACTED_TTREQ",
+        "odin_tt": "REDACTED_ODIN_TT",
+        "passport_csrf_token": "REDACTED_CSRF",
+        "passport_csrf_token_default": "REDACTED_CSRF",
+        "d_ticket": "REDACTED_DTICKET"
     }
     url = "https://api.amemv.com/passport/safe/query_account/"
     params = {
@@ -185,7 +185,7 @@ def query_account(dev={}, mobile="", proxys=None):
 
 if __name__ == '__main__':
 
-    dev = {"aid":"8662","iid":"REDACTED_INSTALL_ID","device_id":"REDACTED_DEVICE_ID","channel":"wandoujia_1128_0413","version_code":310900,"version_name":"31.9.0","device_type":"V2046A","device_brand":"vivo","device_model":"V2046A","device_manufacturer":"vivo","os_api":33,"os_version":"13","openudid":"db520532f38c6fe4","manifest_version_code":320300,"resolution":"2376×1080","dpi":480,"update_version_code":31909900,"host_abi":"arm64-v8a","cdid":"98203c9d-5d7f-46e6-940b-0294e6b5f324","uuid":"","mssdkVersionStr":"v04.06.01-ml-android","mssdkVersionInt":67502336,"ua":"com.ss.android.ugc.aweme/310900 (Linux; U; Android 13; zh_CN; V2046A; Build/TP1A.220624.014; Cronet/TTNetVersion:4801b8cf 2023-09-04 QuicVersion:0d108adb 2023-07-19)","x_tt_dt":"AAA74WVTJS462XT655SB5TK6ZBYJSIFYT4YIOJFIGKSEE4AECHUS2XXF5ITSCRPLQZY4HYOTLRJKMFHRS6MO3OJIXYSCTACYUPGZ7FGGQR4RHYMBX6UDWELMG7BEQ","mssdk_token":"AqG_OdHgdAhDy9ODqDjIq2JNe","rom":"eng.compil.20240308.210140","rom_version":"full_erd9815_rt-user 13 TP1A.220624.014 eng.compil.20240308.210140 release-keys","mssdk_token_200":"AThQKUmjHyypbjZnpnsX-Bl8E","mssdk_token_202":"AqG_OdHgdAhDy9ODqDjIq2JNe","first_launch_timestamp":1737360779777,"server_time":1737360828,"proxy":"","captchaVerify":"false"}
+    dev = {"aid":"8662","iid":"REDACTED_INSTALL_ID","device_id":"REDACTED_DEVICE_ID","channel":"wandoujia_1128_0413","version_code":310900,"version_name":"31.9.0","device_type":"V2046A","device_brand":"vivo","device_model":"V2046A","device_manufacturer":"vivo","os_api":33,"os_version":"REDACTED","openudid":"REDACTED","manifest_version_code":320300,"resolution":"2376x1080","dpi":480,"update_version_code":31909900,"host_abi":"arm64-v8a","cdid":"REDACTED","uuid":"","mssdkVersionStr":"v04.06.01-ml-android","mssdkVersionInt":67502336,"ua":"REDACTED","x_tt_dt":"REDACTED","mssdk_token":"REDACTED","rom":"REDACTED","rom_version":"REDACTED","mssdk_token_200":"REDACTED","mssdk_token_202":"REDACTED","first_launch_timestamp":1700000000000,"server_time":1700000000,"proxy":"","captchaVerify":"false"}
 
     mobile = f"00000000000"
     query_account(dev, mobile=mobile, proxys=None)
